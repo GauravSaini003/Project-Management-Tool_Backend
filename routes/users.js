@@ -147,6 +147,11 @@
 // module.exports = router;
 
 
+
+
+
+
+
 const express = require("express");
 const router = express.Router();
 const User = require("../models/User");
@@ -156,6 +161,10 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const { Op } = require("sequelize");
+const ActivityLog = require("../models/ActivityLog");
+
+// We are adding the  log activity function to log the activity of the user
+// const logActivity = require("../utils/logActivity");
 
 // ✅ Storage configuration for profile pictures
 const storage = multer.diskStorage({
@@ -273,6 +282,17 @@ router.delete("/:id", authMiddleware, roleMiddleware(["admin"]), async (req, res
         // ✅ Soft delete the user instead of permanent delete
         await user.destroy();
 
+
+         // ✅ Log the activity AFTER successful deletion
+         await ActivityLog.create({
+            user_id: req.user.id, // Ensure user_id is provided
+            board_id: null, // Since it's a user action, board_id is null
+            task_id: null, // Since it's a user action, task_id is null
+            action_type: "delete", // Fix: Provide valid action_type
+            description: `User ${user.name} (ID: ${user.id}) was deleted by ${req.user.name} (ID: ${req.user.id})`
+        });
+
+
         res.status(200).json({ message: "User moved to trash successfully" });
     } catch (error) {
         console.error("❌ Error deleting user:", error.message);
@@ -293,6 +313,16 @@ router.put("/restore/:id", authMiddleware, roleMiddleware(["admin"]), async (req
 
         // ✅ Restore user by setting deleted_at = NULL
         await user.restore();
+
+         // Log the activity of user restoration
+         await ActivityLog.create({
+            user_id: req.user.id, // Corrected to match your model
+            board_id: null, // No board for this action
+            task_id: null, // No task for this action
+            action_type: "restore", // Correct action_type field
+            description: `User ${user.name} (ID: ${user.id}) was restored by ${req.user.name} (ID: ${req.user.id})`,
+        });
+        
 
         res.status(200).json({ message: "User restored successfully" });
     } catch (error) {
@@ -340,8 +370,19 @@ router.delete("/trash/:id", authMiddleware, roleMiddleware(["admin"]), async (re
 
         // Permanently delete the user
         await user.destroy({ force: true });
+        
 
-        res.status(200).json({ message: "User permanently deleted" });
+       // Log the activity of permanent deletion
+       await ActivityLog.create({
+        user_id: req.user.id, // Corrected to match your model
+        board_id: null, // No board for this action
+        task_id: null, // No task for this action
+        action_type: "delete", // Correct action_type field
+        description: `User ${user.name} (ID: ${user.id}) was permanently deleted by ${req.user.name} (ID: ${req.user.id})`,
+    });
+    res.status(200).json({ message: "User permanently deleted" }); 
+
+      
     } catch (error) {
         console.error("❌ Error permanently deleting user:", error.message);
         res.status(500).json({ message: "Error permanently deleting user" });
@@ -377,13 +418,22 @@ router.put("/:id", authMiddleware, roleMiddleware(["admin"]), async (req, res) =
         // Save updated user details
         await user.save();
 
+          // Log the activity of user update
+          await ActivityLog.create({
+            user_id: req.user.id, // Corrected to match your model
+            board_id: null, // No board for this action
+            task_id: null, // No task for this action
+            action_type: "update", // Correct action_type field
+            description: `User ${user.name} (ID: ${user.id}) was updated by ${req.user.name} (ID: ${req.user.id})`,
+        });
+        
+
         res.status(200).json({ message: "User updated successfully", user });
     } catch (error) {
         console.error("❌ Error updating user:", error.message);
         res.status(500).json({ message: "Error updating user", error: error.message });
     }
 });
-
 
 // ✅ Upload Profile Picture Route
 router.post("/upload-profile", authMiddleware, upload.single("profile_picture"), async (req, res) => {

@@ -3,6 +3,7 @@ const Board = require("./Board");
 const User = require("./User");
 const ProjectAssignedUser = require("./ProjectAssignedUser");
 const TaskAssignedUsers = require("./taskAssignedUsers");
+const ActivityLog = require("./ActivityLog");
 
 // ✅ Define Relationships Here
 
@@ -35,11 +36,24 @@ User.belongsToMany(Board, { through: ProjectAssignedUser, foreignKey: "user_id" 
 
 
 // ✅ Many-to-Many: Tasks can have multiple assigned users
-// Task.belongsToMany(User, { through: TaskAssignedUsers, foreignKey: "task_id" });
-// User.belongsToMany(Task, { through: TaskAssignedUsers, foreignKey: "user_id" });
-// ✅ A Task can have multiple assigned Users (Many-to-Many)
+
 Task.belongsToMany(User, { through: TaskAssignedUsers, foreignKey: "task_id", as: "assignedUsers" });
 User.belongsToMany(Task, { through: TaskAssignedUsers, foreignKey: "user_id", as: "tasks" });
 
 
-module.exports = { Task, Board, User,ProjectAssignedUser,TaskAssignedUsers };
+// These are the functionality of the activity log table
+// A user can have multiple activity logs
+User.hasMany(ActivityLog, { foreignKey: "user_id" });
+ActivityLog.belongsTo(User, { foreignKey: "user_id" });
+
+// A project (board) can have multiple activity logs
+Board.hasMany(ActivityLog, { foreignKey: "board_id" });
+ActivityLog.belongsTo(Board, { foreignKey: "board_id" });
+
+// A task can have multiple activity logs
+Task.hasMany(ActivityLog, { foreignKey: "task_id" });
+ActivityLog.belongsTo(Task, { foreignKey: "task_id" })
+
+
+
+module.exports = { Task, Board, User, ProjectAssignedUser, TaskAssignedUsers, ActivityLog };

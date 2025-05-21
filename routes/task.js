@@ -201,6 +201,9 @@ const ProjectAssignedUser = require("../models/ProjectAssignedUser");
 const authMiddleware = require("../middleware/auth");
 const roleMiddleware = require("../middleware/roleMiddleware");
 const sendTaskNotification = require("../emailService");
+// This is for the log activity function
+
+const ActivityLog = require("../models/ActivityLog");
 
 // ✅ Get All Tasks of a Specific Project
 router.get("/project/:boardId", authMiddleware, async (req, res) => {
@@ -220,71 +223,6 @@ router.get("/project/:boardId", authMiddleware, async (req, res) => {
         res.status(500).json({ message: "Error fetching tasks", error: error.message });
     }
 });
-
-// ✅ Create a Task (Only ADMIN & MANAGER)
-// router.post("/:boardId", authMiddleware, roleMiddleware(["ADMIN", "MANAGER"]), async (req, res) => {
-//     try {
-//         const { title, description, assignedTo = [], deadline, status, priority } = req.body;
-//         const boardId = req.params.boardId;
-//         const created_by = req.user.id;
-
-//         const board = await Board.findByPk(boardId);
-//         if (!board) return res.status(404).json({ message: "Project not found" });
-
-//         // ✅ Validate priority value
-//         const validPriorities = ["low", "medium", "high"];
-//         if (priority && !validPriorities.includes(priority.toLowerCase())) {
-//             return res.status(400).json({ message: "Invalid priority value. Use low, medium, high, urgent." });
-//         }
-
-//         // ✅ Validate assigned users exist & belong to the project
-//         if (assignedTo.length > 0) {
-//             const usersExist = await User.findAll({ where: { id: assignedTo } });
-//             if (usersExist.length !== assignedTo.length) {
-//                 return res.status(400).json({ message: "One or more assigned users do not exist." });
-//             }
-
-//             const projectMembers = await ProjectAssignedUser.findAll({
-//                 where: { project_id: boardId },
-//                 attributes: ["user_id"],
-//             });
-
-//             const allowedUserIds = projectMembers.map(member => member.user_id);
-//             const invalidUserIds = assignedTo.filter(id => !allowedUserIds.includes(id));
-
-//             if (invalidUserIds.length > 0) {
-//                 return res.status(400).json({
-//                     message: "Users must be assigned to the project first.",
-//                     invalidUserIds,
-//                 });
-//             }
-//         }
-
-//         const newTask = await Task.create({
-//             title,
-//             description,
-//             board_id: boardId, // Ensure column name is correct
-//             created_by,
-//             status: status || "todo",
-//             priority: priority || "medium",
-//             boardId,
-//             deadline,
-//         });
-
-//         // ✅ Assign users if provided
-//         if (assignedTo.length > 0) {
-//             const assignments = assignedTo.map(userId => ({
-//                 task_id: newTask.id,
-//                 user_id: userId,
-//             }));
-//             await TaskAssignedUsers.bulkCreate(assignments);
-//         }
-//         res.status(201).json(newTask);
-//     } catch (error) {
-//         res.status(500).json({ message: "Error creating task", error: error.message });
-//     }
-
-// });
 
 // ✅ Create a Task (Only ADMIN & MANAGER)
 router.post("/:boardId", authMiddleware, roleMiddleware(["ADMIN", "MANAGER"]), async (req, res) => {
@@ -336,6 +274,19 @@ router.post("/:boardId", authMiddleware, roleMiddleware(["ADMIN", "MANAGER"]), a
             deadline,
         });
 
+  // ✅ Log activity for task creation
+  await ActivityLog.create({
+    user_id: req.user.id,
+    board_id: boardId,
+    task_id: newTask.id,
+    action_type: "create",
+    description: `Created a new task: "${title}" in project ID ${boardId}`,
+});
+
+
+
+
+
         // ✅ Assign users if provided
         if (assignedTo.length > 0) {
             const assignments = assignedTo.map(userId => ({
@@ -343,6 +294,21 @@ router.post("/:boardId", authMiddleware, roleMiddleware(["ADMIN", "MANAGER"]), a
                 user_id: userId,
             }));
             await TaskAssignedUsers.bulkCreate(assignments);
+
+
+
+         // Assign users to the task if any
+   // ✅ Log activity for task assignments
+   for (const userId of assignedTo) {
+    await ActivityLog.create({
+        user_id: req.user.id,
+        board_id: boardId,
+        task_id: newTask.id,
+        action_type: "assign",
+        description: `Assigned user ID ${userId} to task "${title}" (Task ID: ${newTask.id})`,
+    });
+}
+
 
             // ✅ Fetch assigned users' emails
             const assignedUsers = await User.findAll({
@@ -384,7 +350,16 @@ router.put("/:id", authMiddleware, roleMiddleware(["MANAGER", "MEMBER", "ADMIN"]
             task.priority = priority || task.priority;
             task.progress = progress !== undefined ? progress : task.progress;
             await task.save();
+            // ✅ Log activity for task updates (Admin can update anything)
+            await ActivityLog.create({
+                user_id: req.user.id,
+                board_id: task.boardId,
+                task_id: task.id,
+                action_type: "update",
+                description: `Admin updated task "${task.title}" (ID: ${task.id}): Status: ${status || task.status}, Priority: ${priority || task.priority}, Progress: ${progress !== undefined ? progress : task.progress}`,
+            });
             return res.status(200).json(task);
+            
         }
 
         // ✅ Check if Member is assigned
@@ -411,11 +386,58 @@ router.put("/:id", authMiddleware, roleMiddleware(["MANAGER", "MEMBER", "ADMIN"]
         }
 
         await task.save();
+
+   // ✅ Log activity for task updates (Managers can update specific task attributes)
+   await ActivityLog.create({
+    user_id: req.user.id,
+    board_id: task.boardId,
+    task_id: task.id,
+    action_type: "update",
+    description: `Updated task "${task.title}" (ID: ${task.id}): Status: ${status || task.status}, Priority: ${priority || task.priority}, Progress: ${progress !== undefined ? progress : task.progress}`,
+});
+
+
         res.status(200).json(task);
     } catch (error) {
         res.status(500).json({ message: "Error updating task", error: error.message });
     }
 });
+
+
+// ✅ Delete Task (Only Admin & Manager who created the task)
+// router.delete("/:id", authMiddleware, roleMiddleware(["ADMIN", "MANAGER"]), async (req, res) => {
+//     try {
+//         const taskId = req.params.id;
+//         const task = await Task.findByPk(taskId);
+//         if (!task) return res.status(404).json({ message: "Task not found" });
+
+//         if (req.user.role === "MANAGER" && task.created_by !== req.user.id) {
+//             return res.status(403).json({ message: "You do not have permission to delete this task" });
+//         }
+
+//         // ✅ Check for dependent records
+//         const taskAssignments = await TaskAssignedUsers.findAll({ where: { task_id: taskId } });
+//         if (taskAssignments.length > 0) {
+//             await TaskAssignedUsers.destroy({ where: { task_id: taskId } });
+//         }
+
+//         await task.destroy();
+
+//  // ✅ Log activity for task deletion
+//  await ActivityLog.create({
+//     user_id: req.user.id,
+//     board_id: task.boardId,
+//     task_id: task.id,
+//     action_type: "delete",
+//     description: `Deleted task "${task.title}" (ID: ${task.id}) from project ID ${task.boardId}`,
+// });
+
+
+//         res.json({ message: "Task deleted successfully" });
+//     } catch (error) {
+//         res.status(500).json({ message: "Error deleting task", error: error.message });
+//     }
+// });
 
 
 // ✅ Delete Task (Only Admin & Manager who created the task)
@@ -425,22 +447,38 @@ router.delete("/:id", authMiddleware, roleMiddleware(["ADMIN", "MANAGER"]), asyn
         const task = await Task.findByPk(taskId);
         if (!task) return res.status(404).json({ message: "Task not found" });
 
+        // Ensure only the creator or an admin can delete the task
         if (req.user.role === "MANAGER" && task.created_by !== req.user.id) {
             return res.status(403).json({ message: "You do not have permission to delete this task" });
         }
 
-        // ✅ Check for dependent records
+        // ✅ Log activity before deleting task
+        await ActivityLog.create({
+            user_id: req.user.id,
+            board_id: task.boardId, // Ensure correct board ID is passed
+            task_id: task.id, // Task ID for the log
+            action_type: "delete",
+            description: `Deleted task "${task.title}" (ID: ${task.id}) from project ID ${task.boardId}`,
+        });
+
+        // ✅ Check for dependent records before deleting
         const taskAssignments = await TaskAssignedUsers.findAll({ where: { task_id: taskId } });
         if (taskAssignments.length > 0) {
             await TaskAssignedUsers.destroy({ where: { task_id: taskId } });
         }
 
+        // ✅ Deleting the task
         await task.destroy();
+
         res.json({ message: "Task deleted successfully" });
     } catch (error) {
+        console.error("❌ Error deleting task:", error);
         res.status(500).json({ message: "Error deleting task", error: error.message });
     }
 });
+
+
+
 
 
 // ✅ Project Report API - Get a detailed report of a project
@@ -511,6 +549,15 @@ router.get("/tasks/all", authMiddleware, roleMiddleware(["ADMIN", "MANAGER","MEM
         if (!tasks.length) return res.status(404).json({ message: "No tasks found in the database." });
 
         res.status(200).json(tasks);
+
+        //  // ✅ Log activity for task retrieval
+        //  await ActivityLog.create({
+        //     user_id: req.user.id,
+        //     action_type: "retrieve",
+        //     description: "Retrieved all tasks",
+        // });
+
+
     } catch (error) {
         console.error("❌ Error fetching all tasks:", error);
         res.status(500).json({ message: "Error fetching tasks", error: error.message });

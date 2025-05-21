@@ -7,6 +7,7 @@ const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/users");
 const taskRoutes = require("./routes/task");
 const projectRoutes = require("./routes/projects");
+const activityLog = require("./routes/activityLog"); // Import activity log routes
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
@@ -84,6 +85,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/task", taskRoutes);
 app.use("/api/projects", projectRoutes);
+app.use("/api/activity-log", activityLog); // Activity log routes
 // Handle Unknown Routes (404)
 app.use((req, res) => {
   res.status(404).json({ message: "Route not found" });
